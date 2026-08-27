@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANVAY - Distributed ANPR</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>ANVAY <span>Multi-Camera Vehicle Intelligence</span></h1>
+            <p class="subtitle">Distributed Vehicle Tracking & ANPR Command Center</p>
+        </div>
+        <div class="kpi-container">
+            <div class="kpi-card">
+                <div class="kpi-value" id="kpi-active">0</div>
+                <div class="kpi-label">ACTIVE VEHICLES</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-value" id="kpi-completed">0</div>
+                <div class="kpi-label">TOTAL JOURNEYS</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-value" id="kpi-cameras">0</div>
+                <div class="kpi-label">CAMERAS ONLINE</div>
+            </div>
+        </div>
+        <div class="status-indicator">
+            <div class="pulse-dot"></div>
+            <span id="connection-status">Connecting to Server...</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Hero Section: Trajectory -->
+        <section class="trajectory-section">
+            <h2>Live Journey Map</h2>
+            <div class="trajectory-map" id="trajectory-map">
+                <!-- Journey visualization will be injected here -->
+                <div class="empty-state">Waiting for vehicle detections...</div>
+            </div>
+        </section>
+
+        <!-- Camera Feeds -->
+        <section class="cameras-section">
+            <h2>Live Camera Nodes</h2>
+            <div class="camera-grid">
+                <!-- Camera 1 -->
+                <div class="camera-panel" id="camera-1">
+                    <div class="camera-header">
+                        <h3>CAMERA 01</h3>
+                        <span class="status-badge offline" id="status-cam-1">OFFLINE</span>
+                    </div>
+                    <div class="camera-feed">
+                        <img id="feed-cam-1" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Camera 1 Feed">
+                        <div class="camera-overlay">
+                            <div class="overlay-text" id="overlay-cam-1">NO SIGNAL</div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Camera 2 -->
+                <div class="camera-panel" id="camera-2">
+                    <div class="camera-header">
+                        <h3>CAMERA 02</h3>
+                        <span class="status-badge offline" id="status-cam-2">OFFLINE</span>
+                    </div>
+                    <div class="camera-feed">
+                        <img id="feed-cam-2" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Camera 2 Feed">
+                        <div class="camera-overlay">
+                            <div class="overlay-text" id="overlay-cam-2">NO SIGNAL</div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Camera 3 -->
+                <div class="camera-panel" id="camera-3">
+                    <div class="camera-header">
+                        <h3>CAMERA 03</h3>
+                        <span class="status-badge offline" id="status-cam-3">OFFLINE</span>
+                    </div>
+                    <div class="camera-feed">
+                        <img id="feed-cam-3" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Camera 3 Feed">
+                        <div class="camera-overlay">
+                            <div class="overlay-text" id="overlay-cam-3">NO SIGNAL</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Lower Section -->
+        <div class="lower-layout">
+            <section class="active-vehicles-section">
+                <h2>Tracked Vehicles</h2>
+                <div class="vehicles-list" id="vehicles-list">
+                    <!-- Vehicle cards will be injected here -->
+                </div>
+            </section>
+
+            <section class="events-section">
+                <h2>Live Event Timeline</h2>
+                <div class="events-timeline" id="events-timeline">
+                    <!-- Events will be injected here -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Large datasets / generated images
+data/demo/
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.png
+data/**/*.zip
+
+# Generated results
+runs/
+results/
+outputs/
+
+# Model weights
+*.pt
+*.pth
+*.onnx
