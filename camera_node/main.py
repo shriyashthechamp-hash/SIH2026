@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 import cv2
 import time
 import requests
@@ -5,35 +10,43 @@ import argparse
 import base64
 import uuid
 import threading
+import sys
+import os
 from queue import Queue
-from ultralytics import YOLO
 
-from core.models import DetectionEvent, BoundingBox
+# Ensure core is importable even if run as a script directly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
+from ultralytics import YOLO
+from core.models import DetectionEvent, BoundingBox, CameraStatusUpdate
 from core.config import SERVER_HOST, SERVER_PORT, VEHICLE_MODEL, PLATE_MODEL, CONFIDENCE_THRESHOLD
 
 event_queue = Queue()
 
-def event_sender(server_url: str):
+def event_sender(server_url: str, camera_id: int):
     while True:
-        event = event_queue.get()
+        msg_type, data = event_queue.get()
         try:
+            endpoint = "/api/events" if msg_type == "event" else "/api/camera/status"
             response = requests.post(
-                f"{server_url}/api/events",
-                json=event.model_dump(),
+                f"{server_url}{endpoint}",
+                json=data,
                 timeout=2
             )
             if response.status_code != 200:
-                print(f"[ERROR] Server responded with {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            pass # Silently drop for hackathon demo to avoid spamming logs when disconnected
+                print(f"[ERROR] Server responded with {response.status_code} for {endpoint}")
+            elif msg_type == "event":
+                print(f"[CAMERA {camera_id}] Event sent successfully")
+        except requests.exceptions.RequestException:
+            pass # Silently drop for hackathon demo to avoid spamming logs when server is down
         finally:
             event_queue.task_done()
 
-def encode_image(img) -> str:
+def encode_image(img, max_dim=640) -> str:
     try:
-        # Resize image for dashboard to save bandwidth
         h, w = img.shape[:2]
-        max_dim = 400
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
             img = cv2.resize(img, (int(w * scale), int(h * scale)))
@@ -48,8 +61,9 @@ def run_camera_node(camera_id: int, source: str):
     print(f"[CAMERA {camera_id}] Starting node...")
     print(f"[CAMERA {camera_id}] Connecting to server at {server_url}")
 
-    sender_thread = threading.Thread(target=event_sender, args=(server_url,), daemon=True)
+    sender_thread = threading.Thread(target=event_sender, args=(server_url, camera_id), daemon=True)
     sender_thread.start()
+    print(f"[CAMERA {camera_id}] Connected to server thread started")
 
     print(f"[CAMERA {camera_id}] Loading models...")
     vehicle_model = YOLO(VEHICLE_MODEL)
@@ -61,6 +75,7 @@ def run_camera_node(camera_id: int, source: str):
         print(f"[ERROR] Failed to open source: {source}")
         return
 
+    print(f"[CAMERA {camera_id}] Camera opened successfully")
     print(f"[CAMERA {camera_id}] Online and capturing.")
 
     frame_count = 0
@@ -108,9 +123,21 @@ def run_camera_node(camera_id: int, source: str):
                             plate_conf = float(pr.boxes[0].conf[0])
                             px1, py1, px2, py2 = map(float, pr.boxes[0].xyxy[0])
                             plate_bbox = BoundingBox(x1=px1, y1=py1, x2=px2, y2=py2)
+                            
+                            # Annotate Plate on frame
+                            cv2.rectangle(frame, (x1 + int(px1), y1 + int(py1)), (x1 + int(px2), y1 + int(py2)), (255, 0, 0), 2)
+                            cv2.putText(frame, "PLATE", (x1 + int(px1), y1 + int(py1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                            print(f"[CAMERA {camera_id}] Plate detected")
                             break 
 
-                img_base64 = encode_image(vehicle_crop) if vehicle_crop.size > 0 else None
+                # Annotate Vehicle on frame
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"{vehicle_type.upper()} {confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+                print(f"[CAMERA {camera_id}] Vehicle detected: {vehicle_type}")
+
+                # Encode small crop for vehicle list in UI
+                img_base64 = encode_image(vehicle_crop, max_dim=200) if vehicle_crop.size > 0 else None
 
                 event = DetectionEvent(
                     event_id=str(uuid.uuid4()),
@@ -125,8 +152,16 @@ def run_camera_node(camera_id: int, source: str):
                     image_base64=img_base64
                 )
                 
-                event_queue.put(event)
-                print(f"[CAMERA {camera_id}] Detected {vehicle_type} (conf: {confidence:.2f}), Plate: {plate_detected}")
+                event_queue.put(("event", event.model_dump()))
+                
+        # Send full annotated frame to dashboard as a heartbeat/status update
+        full_frame_base64 = encode_image(frame, max_dim=640)
+        status_update = CameraStatusUpdate(
+            camera_id=camera_id,
+            status="ONLINE",
+            frame_base64=full_frame_base64
+        )
+        event_queue.put(("status", status_update.model_dump()))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

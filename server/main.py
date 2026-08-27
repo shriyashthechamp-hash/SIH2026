@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from core.models import DetectionEvent
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,8 +28,7 @@ app.add_middleware(
 
 engine = TrackingEngine()
 
-# Mount dashboard
-app.mount("/", StaticFiles(directory="dashboard", html=True), name="dashboard")
+# Dashboard will be mounted at the end
 
 class ConnectionManager:
     def __init__(self):
@@ -69,6 +74,21 @@ async def receive_event(event: DetectionEvent):
     })
     return {"status": "success", "vehicle_id": vehicle.global_vehicle_id}
 
+@app.post("/api/camera/status")
+async def receive_camera_status(update: dict):
+    # update is a dict to avoid circular imports or redefining, but let's just use it
+    camera_id = update.get("camera_id")
+    status = update.get("status")
+    frame_base64 = update.get("frame_base64")
+    
+    engine.update_camera_status(camera_id, status, frame_base64)
+    
+    await manager.broadcast({
+        "type": "camera_update",
+        "camera": engine.camera_statuses[camera_id].model_dump()
+    })
+    return {"status": "success"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -90,7 +110,11 @@ async def cleanup_task():
 
 @app.on_event("startup")
 async def startup_event():
+    print(f"[SERVER] Listening on 0.0.0.0:{SERVER_PORT}")
     asyncio.create_task(cleanup_task())
 
+# Mount dashboard at the very end to avoid intercepting API routes (fixes 405 error)
+app.mount("/", StaticFiles(directory="dashboard", html=True), name="dashboard")
+
 if __name__ == "__main__":
-    uvicorn.run("server.main:app", host=SERVER_HOST, port=SERVER_PORT, reload=True)
+    uvicorn.run("server.main:app", host="0.0.0.0", port=SERVER_PORT, reload=True)

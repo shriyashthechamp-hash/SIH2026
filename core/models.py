@@ -20,6 +20,11 @@ class DetectionEvent(BaseModel):
     plate_box: Optional[BoundingBox] = None
     image_base64: Optional[str] = None 
 
+class CameraStatusUpdate(BaseModel):
+    camera_id: int
+    status: str
+    frame_base64: Optional[str] = None
+
 class CameraStatus(BaseModel):
     camera_id: int
     status: str
