@@ -85,7 +85,8 @@ def run_camera_node(camera_id: int, source: str):
         ret, frame = cap.read()
         if not ret:
             if not source.isdigit():
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                cap.release()
+                cap = cv2.VideoCapture(source)
                 continue
             break
 

@@ -2,7 +2,7 @@ from ultralytics import YOLO
 from pathlib import Path
 
 # Load license plate model
-model = YOLO("models/license-plate-finetune-v1n.pt")
+model = YOLO("models/license-plate-finetune-v2-best.pt")
 
 # Take some demo images
 images = list(Path("data/demo").rglob("*.jpg"))[:20]
