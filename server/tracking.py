@@ -53,6 +53,14 @@ class TrackingEngine:
             vehicle.duration = now - vehicle.first_seen
             if event.plate_detected:
                 vehicle.plate_detected = True
+            if event.plate_text:
+                vehicle.plate_text = event.plate_text
+            if event.ocr_confidence:
+                vehicle.ocr_confidence = event.ocr_confidence
+            if event.plate_confidence:
+                vehicle.plate_confidence = event.plate_confidence
+            if event.vehicle_color:
+                vehicle.vehicle_color = event.vehicle_color
             if event.image_base64:
                 vehicle.latest_image_base64 = event.image_base64
             
@@ -68,6 +76,10 @@ class TrackingEngine:
                 last_seen=now,
                 current_camera=event.camera_id,
                 journey=[JourneyStage(camera_id=event.camera_id, timestamp=now, confidence=event.confidence)],
+                plate_text=event.plate_text,
+                ocr_confidence=event.ocr_confidence,
+                plate_confidence=event.plate_confidence,
+                vehicle_color=event.vehicle_color,
                 latest_image_base64=event.image_base64
             )
             self.active_vehicles[new_vid] = new_vehicle

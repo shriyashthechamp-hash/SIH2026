@@ -12,7 +12,74 @@ import uuid
 import threading
 import sys
 import os
+import re
+import numpy as np
+import pytesseract
 from queue import Queue
+
+def clean_text(text):
+    text = text.upper()
+    text = re.sub(r"[^A-Z0-9]", "", text)
+    return text
+
+def estimate_vehicle_color(crop):
+    if crop.size == 0:
+        return "UNKNOWN"
+    # Basic color estimation using mean color
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    avg_h = np.mean(h)
+    avg_s = np.mean(s)
+    avg_v = np.mean(v)
+    
+    if avg_v < 50: return "BLACK"
+    if avg_s < 30 and avg_v > 200: return "WHITE"
+    if avg_s < 30 and avg_v > 50: return "GREY"
+    if avg_s < 50 and avg_v > 150: return "SILVER"
+    
+    if avg_h < 10 or avg_h > 170: return "RED"
+    if 10 <= avg_h < 35: return "YELLOW"
+    if 35 <= avg_h < 85: return "GREEN"
+    if 85 <= avg_h < 130: return "BLUE"
+    
+    return "UNKNOWN"
+
+def preprocess_variants(crop):
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(gray, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    contrast = cv2.equalizeHist(gray)
+    blur = cv2.GaussianBlur(contrast, (3, 3), 0)
+    _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    adaptive = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11)
+    return {"gray": gray, "contrast": contrast, "otsu": otsu, "adaptive": adaptive}
+
+def run_ocr(images):
+    config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    readings = []
+    for name, image in images.items():
+        data = pytesseract.image_to_data(image, config=config, output_type=pytesseract.Output.DICT)
+        text = ""
+        conf = 0.0
+        words = 0
+        for i, word in enumerate(data['text']):
+            if word.strip():
+                text += word
+                conf += float(data['conf'][i])
+                words += 1
+        if words > 0:
+            avg_conf = (conf / words) / 100.0
+            clean = clean_text(text)
+            if clean:
+                readings.append((name, clean, avg_conf))
+    return readings
+
+def choose_result(readings):
+    if not readings:
+        return None, None
+    valid_length = [(text, conf) for _, text, conf in readings if 8 <= len(text) <= 12]
+    if valid_length:
+        return max(valid_length, key=lambda x: len(x[0]))
+    return max([(text, conf) for _, text, conf in readings], key=lambda x: len(x[0]))
 
 # Ensure core is importable even if run as a script directly
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -115,6 +182,10 @@ def run_camera_node(camera_id: int, source: str):
                 plate_detected = False
                 plate_conf = None
                 plate_bbox = None
+                plate_text = None
+                ocr_conf = None
+                
+                vehicle_color = estimate_vehicle_color(vehicle_crop)
                 
                 if vehicle_crop.size > 0:
                     plate_results = plate_model(vehicle_crop, conf=CONFIDENCE_THRESHOLD, verbose=False)
@@ -123,19 +194,45 @@ def run_camera_node(camera_id: int, source: str):
                             plate_detected = True
                             plate_conf = float(pr.boxes[0].conf[0])
                             px1, py1, px2, py2 = map(float, pr.boxes[0].xyxy[0])
-                            plate_bbox = BoundingBox(x1=px1, y1=py1, x2=px2, y2=py2)
+                            
+                            # actual plate crop from vehicle crop
+                            plate_crop = vehicle_crop[int(py1):int(py2), int(px1):int(px2)]
+                            if plate_crop.size > 0:
+                                variants = preprocess_variants(plate_crop)
+                                readings = run_ocr(variants)
+                                pt, oc = choose_result(readings)
+                                if pt:
+                                    plate_text = pt
+                                    ocr_conf = oc
+
+                            px1_full = x1 + px1
+                            py1_full = y1 + py1
+                            px2_full = x1 + px2
+                            py2_full = y1 + py2
+                            
+                            plate_bbox = BoundingBox(x1=px1_full, y1=py1_full, x2=px2_full, y2=py2_full)
                             
                             # Annotate Plate on frame
-                            cv2.rectangle(frame, (x1 + int(px1), y1 + int(py1)), (x1 + int(px2), y1 + int(py2)), (255, 0, 0), 2)
-                            cv2.putText(frame, "PLATE", (x1 + int(px1), y1 + int(py1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                            print(f"[CAMERA {camera_id}] Plate detected")
+                            cv2.rectangle(frame, (int(px1_full), int(py1_full)), (int(px2_full), int(py2_full)), (255, 0, 0), 2)
+                            label = f"{plate_text}" if plate_text else "PLATE"
+                            cv2.putText(frame, label, (int(px1_full), int(py1_full) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                            
                             break 
 
                 # Annotate Vehicle on frame
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"{vehicle_type.upper()} {confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(frame, f"{vehicle_color} {vehicle_type.upper()} {confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
-                print(f"[CAMERA {camera_id}] Vehicle detected: {vehicle_type}")
+                print(f"[CAMERA {camera_id}] Vehicle: {vehicle_type.upper()}")
+                print(f"[CAMERA {camera_id}] Vehicle Confidence: {confidence:.2f}")
+                print(f"[CAMERA {camera_id}] Color: {vehicle_color}")
+                if plate_detected:
+                    print(f"[CAMERA {camera_id}] Plate Detected: YES")
+                    print(f"[CAMERA {camera_id}] Plate Detector Confidence: {plate_conf:.2f}")
+                    print(f"[CAMERA {camera_id}] Plate OCR: {plate_text if plate_text else 'NO PLATE'}")
+                    if ocr_conf:
+                        print(f"[CAMERA {camera_id}] OCR Confidence: {ocr_conf:.2f}")
+                print("-" * 30)
 
                 # Encode small crop for vehicle list in UI
                 img_base64 = encode_image(vehicle_crop, max_dim=200) if vehicle_crop.size > 0 else None
@@ -150,6 +247,9 @@ def run_camera_node(camera_id: int, source: str):
                     plate_detected=plate_detected,
                     plate_confidence=plate_conf,
                     plate_box=plate_bbox,
+                    plate_text=plate_text,
+                    ocr_confidence=ocr_conf,
+                    vehicle_color=vehicle_color,
                     image_base64=img_base64
                 )
                 

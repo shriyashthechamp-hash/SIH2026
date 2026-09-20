@@ -18,6 +18,9 @@ class DetectionEvent(BaseModel):
     plate_detected: bool
     plate_confidence: Optional[float] = None
     plate_box: Optional[BoundingBox] = None
+    plate_text: Optional[str] = None
+    ocr_confidence: Optional[float] = None
+    vehicle_color: Optional[str] = None
     image_base64: Optional[str] = None 
 
 class CameraStatusUpdate(BaseModel):
@@ -47,4 +50,8 @@ class VehicleIdentity(BaseModel):
     journey: List[JourneyStage] = []
     is_completed: bool = False
     duration: float = 0.0
+    plate_confidence: Optional[float] = None
+    plate_text: Optional[str] = None
+    ocr_confidence: Optional[float] = None
+    vehicle_color: Optional[str] = None
     latest_image_base64: Optional[str] = None
