@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.env
 
 # Large datasets / generated images
 data/demo/
@@ -14,6 +15,18 @@ data/**/*.zip
 runs/
 results/
 outputs/
+
+# Logs and debug artifacts
+logs/
+*.log
+debug/
+tmp/
+temp/
+test_output/
+
+# OCR artifacts
+ocr_output/
+*.txt
 
 # Model weights
 *.pt

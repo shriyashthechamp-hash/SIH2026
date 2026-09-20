@@ -50,6 +50,9 @@ function handleMessage(data) {
         updateUI();
     } else if (data.type === 'camera_update') {
         state.cameras[data.camera.camera_id] = data.camera;
+        if (data.camera.last_frame_base64 && data.camera.last_frame_base64.length > 20000) {
+            renderCameraFeed(data.camera.camera_id, data.camera.last_frame_base64);
+        }
         updateUI();
     } else if (data.type === 'vehicle_completed') {
         delete state.active_vehicles[data.vehicle.global_vehicle_id];
@@ -77,6 +80,20 @@ function logEvent(message, vid) {
     }
 }
 
+function renderCameraFeed(cameraId, base64Str) {
+    if (!base64Str) return;
+    const canvas = document.getElementById(`feed-cam-${cameraId}`);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+    };
+    img.src = `data:image/jpeg;base64,${base64Str}`;
+}
+
 function updateUI() {
     // Update KPIs
     document.getElementById('kpi-active').textContent = Object.keys(state.active_vehicles).length;
@@ -94,8 +111,9 @@ function updateUI() {
         if (cam && (Date.now()/1000 - cam.last_seen) < 10) {
             statusEl.textContent = 'ONLINE';
             statusEl.className = 'status-badge online';
-            if (cam.last_frame_base64) {
-                feedEl.src = `data:image/jpeg;base64,${cam.last_frame_base64}`;
+            
+            // Note: feed is rendered separately via renderCameraFeed()
+            if (cam.last_frame_base64 && cam.last_frame_base64.length > 20000) {
                 feedContainer.classList.add('active');
             }
             
@@ -166,11 +184,26 @@ function updateUI() {
                 <h4>${v.global_vehicle_id}</h4>
                 <div class="vehicle-meta">
                     <span>${v.vehicle_type.toUpperCase()}</span>
-                    <span>CONF: ${(v.confidence*100).toFixed(0)}%</span>
-                    <span>${v.plate_detected ? 'PLATE' : ''}</span>
+                    <span>${(v.confidence*100).toFixed(0)}%</span>
                 </div>
+                <div class="vehicle-meta" style="margin-top: 5px;">
+                    <span>COLOR</span>
+                    <strong>${v.vehicle_color || 'UNKNOWN'}</strong>
+                </div>
+                <div class="vehicle-meta" style="margin-top: 5px;">
+                    <span>LICENSE PLATE</span>
+                    <strong>${v.plate_text ? v.plate_text : (v.plate_detected ? 'PLATE DETECTED' : 'NO PLATE')}</strong>
+                </div>
+                ${v.plate_confidence ? `<div class="vehicle-meta" style="margin-top: 5px;">
+                    <span>PLATE DETECTOR</span>
+                    <strong>${(v.plate_confidence*100).toFixed(0)}%</strong>
+                </div>` : ''}
+                ${v.ocr_confidence ? `<div class="vehicle-meta" style="margin-top: 5px;">
+                    <span>OCR</span>
+                    <strong>${(v.ocr_confidence*100).toFixed(0)}%</strong>
+                </div>` : ''}
             </div>
-            <div class="vehicle-details">
+            <div class="vehicle-details" style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 10px; padding-top: 10px;">
                 <div class="vehicle-meta">
                     <div>Current: <strong>Camera ${v.current_camera}</strong></div>
                     <div>Duration: <strong>${v.duration.toFixed(1)}s</strong></div>

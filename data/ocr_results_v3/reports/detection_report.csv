@@ -1,0 +1,7 @@
+threshold,total_images,images_with_detections,images_no_detections,total_detections,duplicate_detections,very_small_crops,suspiciously_large_crops,avg_confidence
+0.2,1392,1392,0,1403,11,0,2,0.8792
+0.25,1392,1392,0,1400,8,0,2,0.8806
+0.3,1392,1391,1,1398,7,0,2,0.8814
+0.35,1392,1391,1,1396,5,0,2,0.8822
+0.4,1392,1390,2,1395,5,0,2,0.8826
+0.5,1392,1390,2,1395,5,0,2,0.8826
