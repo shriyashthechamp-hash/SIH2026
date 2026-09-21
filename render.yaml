@@ -1,8 +1,10 @@
 services:
   - type: web
     name: anvay-server
-    env: docker
+    runtime: docker
+    plan: free
     dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
