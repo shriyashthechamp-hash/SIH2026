@@ -27,12 +27,12 @@ export function useAnvayWebSocket() {
         setConnectionStatus('Connecting...');
         
         let wsUrl = import.meta.env.VITE_WS_URL;
-        if (!wsUrl) {
-            // Fallback for local development or infer from location
+        if (!wsUrl || import.meta.env.PROD) {
+            // Fallback for local development or infer from location in production
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = import.meta.env.VITE_API_URL 
-                ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '') 
-                : window.location.host;
+            const host = (import.meta.env.PROD || !import.meta.env.VITE_API_URL)
+                ? window.location.host 
+                : import.meta.env.VITE_API_URL.replace(/^https?:\/\//, '');
             wsUrl = `${protocol}//${host}/ws`;
         }
 

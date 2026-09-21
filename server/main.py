@@ -132,8 +132,21 @@ async def cleanup_task():
     except asyncio.CancelledError:
         pass
 
-# Mount dashboard at the very end to avoid intercepting API routes (fixes 405 error)
-app.mount("/", StaticFiles(directory="dashboard", html=True), name="dashboard")
+from fastapi.responses import FileResponse
+
+# Serve React static assets
+dist_path = Path("frontend/dist")
+assets_path = dist_path / "assets"
+if assets_path.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+# SPA fallback
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    file_path = dist_path / full_path
+    if file_path.is_file():
+        return FileResponse(file_path)
+    return FileResponse(dist_path / "index.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", SERVER_PORT))
