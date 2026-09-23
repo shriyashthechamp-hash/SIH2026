@@ -1,11 +1,13 @@
 import sys
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from core.models import DetectionEvent
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -16,7 +18,14 @@ from core.models import DetectionEvent
 from core.config import SERVER_HOST, SERVER_PORT
 from server.tracking import TrackingEngine
 
-app = FastAPI(title="ANVAY Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print(f"[SERVER] Listening on 0.0.0.0:{os.environ.get('PORT', SERVER_PORT)}")
+    task = asyncio.create_task(cleanup_task())
+    yield
+    task.cancel()
+
+app = FastAPI(title="ANVAY Server", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,9 +65,17 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "ANVAY"}
+
 @app.post("/api/events")
 async def receive_event(event: DetectionEvent):
-    vehicle = engine.process_detection(event)
+    try:
+        vehicle = engine.process_detection(event)
+    except Exception as e:
+        print(f"[ERROR] Error processing event: {e}")
+        raise HTTPException(status_code=500, detail="Error processing event")
     
     # Broadcast event
     await manager.broadcast({
@@ -76,12 +93,16 @@ async def receive_event(event: DetectionEvent):
 
 @app.post("/api/camera/status")
 async def receive_camera_status(update: dict):
-    # update is a dict to avoid circular imports or redefining, but let's just use it
-    camera_id = update.get("camera_id")
-    status = update.get("status")
-    frame_base64 = update.get("frame_base64")
-    
-    engine.update_camera_status(camera_id, status, frame_base64)
+    try:
+        camera_id = update.get("camera_id")
+        status = update.get("status")
+        frame_base64 = update.get("frame_base64")
+        
+        if camera_id is not None:
+            engine.update_camera_status(camera_id, status, frame_base64)
+    except Exception as e:
+        print(f"[ERROR] Error processing camera status: {e}")
+        raise HTTPException(status_code=500, detail="Error processing camera status")
     
     await manager.broadcast({
         "type": "camera_update",
@@ -99,22 +120,34 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 async def cleanup_task():
-    while True:
-        completed = engine.cleanup_stale_vehicles()
-        for v in completed:
-            await manager.broadcast({
-                "type": "vehicle_completed",
-                "vehicle": v.model_dump()
-            })
-        await asyncio.sleep(5)
+    try:
+        while True:
+            completed = engine.cleanup_stale_vehicles()
+            for v in completed:
+                await manager.broadcast({
+                    "type": "vehicle_completed",
+                    "vehicle": v.model_dump()
+                })
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        pass
 
-@app.on_event("startup")
-async def startup_event():
-    print(f"[SERVER] Listening on 0.0.0.0:{SERVER_PORT}")
-    asyncio.create_task(cleanup_task())
+from fastapi.responses import FileResponse
 
-# Mount dashboard at the very end to avoid intercepting API routes (fixes 405 error)
-app.mount("/", StaticFiles(directory="dashboard", html=True), name="dashboard")
+# Serve React static assets
+dist_path = Path("frontend/dist")
+assets_path = dist_path / "assets"
+if assets_path.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+# SPA fallback
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    file_path = dist_path / full_path
+    if file_path.is_file():
+        return FileResponse(file_path)
+    return FileResponse(dist_path / "index.html")
 
 if __name__ == "__main__":
-    uvicorn.run("server.main:app", host="0.0.0.0", port=SERVER_PORT, reload=True)
+    port = int(os.environ.get("PORT", SERVER_PORT))
+    uvicorn.run("server.main:app", host="0.0.0.0", port=port, reload=True)

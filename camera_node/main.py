@@ -23,7 +23,7 @@ def clean_text(text):
     return text
 
 def estimate_vehicle_color(crop):
-    if crop.size == 0:
+    if crop is None or crop.size == 0:
         return "UNKNOWN"
     # Basic color estimation using mean color
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
@@ -103,9 +103,7 @@ def event_sender(server_url: str, camera_id: int):
                 timeout=2
             )
             if response.status_code != 200:
-                print(f"[ERROR] Server responded with {response.status_code} for {endpoint}")
-            elif msg_type == "event":
-                print(f"[CAMERA {camera_id}] Event sent successfully")
+                pass # Fail silently to prevent console spam
         except requests.exceptions.RequestException:
             pass # Silently drop for hackathon demo to avoid spamming logs when server is down
         finally:
@@ -122,6 +120,29 @@ def encode_image(img, max_dim=640) -> str:
     except Exception:
         return None
 
+def print_structured_log(camera_id, vehicle_type, vehicle_conf, color, plate_detected, plate_conf, plate_text, ocr_conf):
+    print("="*50)
+    print(f"ANVAY CAMERA {camera_id:02d}")
+    print("="*50)
+    print("Status: ONLINE\n")
+    print("Vehicle:")
+    print(vehicle_type.upper() if vehicle_type else "UNKNOWN")
+    print("\nVehicle confidence:")
+    print(f"{vehicle_conf:.2f}" if vehicle_conf else "N/A")
+    print("\nColour:")
+    print(color if color else "UNKNOWN")
+    print("\nPlate detected:")
+    print("YES" if plate_detected else "NO")
+    if plate_detected:
+        print("\nPlate detector confidence:")
+        print(f"{plate_conf:.2f}" if plate_conf else "N/A")
+        print("\nOCR:")
+        print(plate_text if plate_text else "NO PLATE")
+        print("\nOCR confidence:")
+        print(f"{ocr_conf:.2f}" if ocr_conf else "UNAVAILABLE")
+    print("\nEvent: SENT")
+    print("="*50)
+
 def run_camera_node(camera_id: int, source: str):
     server_url = f"http://{SERVER_HOST}:{SERVER_PORT}"
     
@@ -133,10 +154,21 @@ def run_camera_node(camera_id: int, source: str):
     print(f"[CAMERA {camera_id}] Connected to server thread started")
 
     print(f"[CAMERA {camera_id}] Loading models...")
-    vehicle_model = YOLO(VEHICLE_MODEL)
-    plate_model = YOLO(PLATE_MODEL)
+    try:
+        vehicle_model = YOLO(VEHICLE_MODEL)
+        plate_model = YOLO(PLATE_MODEL)
+    except Exception as e:
+        print(f"[ERROR] Failed to load models: {e}")
+        return
 
-    cap = cv2.VideoCapture(int(source) if source.isdigit() else source)
+    try:
+        if source.isdigit():
+            cap = cv2.VideoCapture(int(source))
+        else:
+            cap = cv2.VideoCapture(source)
+    except Exception as e:
+        print(f"[ERROR] Failed to open source {source}: {e}")
+        return
 
     if not cap.isOpened():
         print(f"[ERROR] Failed to open source: {source}")
@@ -147,122 +179,133 @@ def run_camera_node(camera_id: int, source: str):
 
     frame_count = 0
     process_every = 5 
+    last_log_time = 0
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            if not source.isdigit():
-                cap.release()
-                cap = cv2.VideoCapture(source)
+        try:
+            ret, frame = cap.read()
+            if not ret:
+                if not source.isdigit():
+                    # Loop video
+                    cap.release()
+                    cap = cv2.VideoCapture(source)
+                    continue
+                else:
+                    print(f"[CAMERA {camera_id}] Feed ended.")
+                    break
+
+            frame_count += 1
+            if frame_count % process_every != 0:
                 continue
-            break
-
-        frame_count += 1
-        if frame_count % process_every != 0:
-            continue
-
-        results = vehicle_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-        
-        for result in results:
-            boxes = result.boxes
-            if boxes is None or len(boxes) == 0:
-                continue
-
-            for box in boxes:
-                class_id = int(box.cls[0])
-                confidence = float(box.conf[0])
-                vehicle_type = vehicle_model.names[class_id]
                 
-                if vehicle_type not in ["car", "motorcycle", "bus", "truck"]:
+            start_time = time.time()
+            results = vehicle_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
+            
+            for result in results:
+                boxes = result.boxes
+                if boxes is None or len(boxes) == 0:
                     continue
 
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                vehicle_crop = frame[y1:y2, x1:x2]
-                
-                plate_detected = False
-                plate_conf = None
-                plate_bbox = None
-                plate_text = None
-                ocr_conf = None
-                
-                vehicle_color = estimate_vehicle_color(vehicle_crop)
-                
-                if vehicle_crop.size > 0:
-                    plate_results = plate_model(vehicle_crop, conf=CONFIDENCE_THRESHOLD, verbose=False)
-                    for pr in plate_results:
-                        if pr.boxes and len(pr.boxes) > 0:
-                            plate_detected = True
-                            plate_conf = float(pr.boxes[0].conf[0])
-                            px1, py1, px2, py2 = map(float, pr.boxes[0].xyxy[0])
-                            
-                            # actual plate crop from vehicle crop
-                            plate_crop = vehicle_crop[int(py1):int(py2), int(px1):int(px2)]
-                            if plate_crop.size > 0:
-                                variants = preprocess_variants(plate_crop)
-                                readings = run_ocr(variants)
-                                pt, oc = choose_result(readings)
-                                if pt:
-                                    plate_text = pt
-                                    ocr_conf = oc
+                for box in boxes:
+                    class_id = int(box.cls[0])
+                    confidence = float(box.conf[0])
+                    vehicle_type = vehicle_model.names[class_id]
+                    
+                    if vehicle_type not in ["car", "motorcycle", "bus", "truck"]:
+                        continue
 
-                            px1_full = x1 + px1
-                            py1_full = y1 + py1
-                            px2_full = x1 + px2
-                            py2_full = y1 + py2
-                            
-                            plate_bbox = BoundingBox(x1=px1_full, y1=py1_full, x2=px2_full, y2=py2_full)
-                            
-                            # Annotate Plate on frame
-                            cv2.rectangle(frame, (int(px1_full), int(py1_full)), (int(px2_full), int(py2_full)), (255, 0, 0), 2)
-                            label = f"{plate_text}" if plate_text else "PLATE"
-                            cv2.putText(frame, label, (int(px1_full), int(py1_full) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                            
-                            break 
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    # Safe crop
+                    h, w = frame.shape[:2]
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    vehicle_crop = frame[y1:y2, x1:x2]
+                    
+                    plate_detected = False
+                    plate_conf = None
+                    plate_bbox = None
+                    plate_text = None
+                    ocr_conf = None
+                    
+                    vehicle_color = estimate_vehicle_color(vehicle_crop)
+                    
+                    if vehicle_crop.size > 0:
+                        plate_results = plate_model(vehicle_crop, conf=CONFIDENCE_THRESHOLD, verbose=False)
+                        for pr in plate_results:
+                            if pr.boxes and len(pr.boxes) > 0:
+                                plate_detected = True
+                                plate_conf = float(pr.boxes[0].conf[0])
+                                px1, py1, px2, py2 = map(float, pr.boxes[0].xyxy[0])
+                                
+                                # actual plate crop from vehicle crop
+                                p_h, p_w = vehicle_crop.shape[:2]
+                                px1, py1 = max(0, int(px1)), max(0, int(py1))
+                                px2, py2 = min(p_w, int(px2)), min(p_h, int(py2))
+                                
+                                plate_crop = vehicle_crop[py1:py2, px1:px2]
+                                if plate_crop.size > 0:
+                                    variants = preprocess_variants(plate_crop)
+                                    readings = run_ocr(variants)
+                                    pt, oc = choose_result(readings)
+                                    if pt:
+                                        plate_text = pt
+                                        ocr_conf = oc
 
-                # Annotate Vehicle on frame
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"{vehicle_color} {vehicle_type.upper()} {confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
-                print(f"[CAMERA {camera_id}] Vehicle: {vehicle_type.upper()}")
-                print(f"[CAMERA {camera_id}] Vehicle Confidence: {confidence:.2f}")
-                print(f"[CAMERA {camera_id}] Color: {vehicle_color}")
-                if plate_detected:
-                    print(f"[CAMERA {camera_id}] Plate Detected: YES")
-                    print(f"[CAMERA {camera_id}] Plate Detector Confidence: {plate_conf:.2f}")
-                    print(f"[CAMERA {camera_id}] Plate OCR: {plate_text if plate_text else 'NO PLATE'}")
-                    if ocr_conf:
-                        print(f"[CAMERA {camera_id}] OCR Confidence: {ocr_conf:.2f}")
-                print("-" * 30)
+                                px1_full = x1 + px1
+                                py1_full = y1 + py1
+                                px2_full = x1 + px2
+                                py2_full = y1 + py2
+                                
+                                plate_bbox = BoundingBox(x1=float(px1_full), y1=float(py1_full), x2=float(px2_full), y2=float(py2_full))
+                                
+                                # Annotate Plate on frame
+                                cv2.rectangle(frame, (px1_full, py1_full), (px2_full, py2_full), (255, 0, 0), 2)
+                                label = f"{plate_text}" if plate_text else "PLATE"
+                                cv2.putText(frame, label, (px1_full, py1_full - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                                
+                                break 
 
-                # Encode small crop for vehicle list in UI
-                img_base64 = encode_image(vehicle_crop, max_dim=200) if vehicle_crop.size > 0 else None
+                    # Annotate Vehicle on frame
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label = f"{vehicle_color} {vehicle_type.upper()} {int(confidence*100)}%"
+                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    
+                    if time.time() - last_log_time > 2.0:
+                        print_structured_log(camera_id, vehicle_type, confidence, vehicle_color, plate_detected, plate_conf, plate_text, ocr_conf)
+                        last_log_time = time.time()
 
-                event = DetectionEvent(
-                    event_id=str(uuid.uuid4()),
-                    camera_id=camera_id,
-                    timestamp=time.time(),
-                    vehicle_type=vehicle_type,
-                    confidence=confidence,
-                    bounding_box=BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2)),
-                    plate_detected=plate_detected,
-                    plate_confidence=plate_conf,
-                    plate_box=plate_bbox,
-                    plate_text=plate_text,
-                    ocr_confidence=ocr_conf,
-                    vehicle_color=vehicle_color,
-                    image_base64=img_base64
-                )
-                
-                event_queue.put(("event", event.model_dump()))
-                
-        # Send full annotated frame to dashboard as a heartbeat/status update
-        full_frame_base64 = encode_image(frame, max_dim=640)
-        status_update = CameraStatusUpdate(
-            camera_id=camera_id,
-            status="ONLINE",
-            frame_base64=full_frame_base64
-        )
-        event_queue.put(("status", status_update.model_dump()))
+                    # Encode small crop for vehicle list in UI
+                    img_base64 = encode_image(vehicle_crop, max_dim=200) if vehicle_crop.size > 0 else None
+
+                    event = DetectionEvent(
+                        event_id=str(uuid.uuid4()),
+                        camera_id=camera_id,
+                        timestamp=time.time(),
+                        vehicle_type=vehicle_type,
+                        confidence=confidence,
+                        bounding_box=BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2)),
+                        plate_detected=plate_detected,
+                        plate_confidence=plate_conf,
+                        plate_box=plate_bbox,
+                        plate_text=plate_text,
+                        ocr_confidence=ocr_conf,
+                        vehicle_color=vehicle_color,
+                        image_base64=img_base64
+                    )
+                    
+                    event_queue.put(("event", event.model_dump()))
+                    
+            # Send full annotated frame to dashboard as a heartbeat/status update
+            full_frame_base64 = encode_image(frame, max_dim=640)
+            status_update = CameraStatusUpdate(
+                camera_id=camera_id,
+                status="ONLINE",
+                frame_base64=full_frame_base64
+            )
+            event_queue.put(("status", status_update.model_dump()))
+        except Exception as e:
+            print(f"[ERROR] Exception in processing loop: {e}")
+            time.sleep(1) # Prevent hot loop
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -270,4 +313,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", type=str, default="0", help="Camera source (0 for webcam, or path to video)")
     args = parser.parse_args()
     
-    run_camera_node(args.camera_id, args.source)
+    try:
+        run_camera_node(args.camera_id, args.source)
+    except KeyboardInterrupt:
+        print(f"[CAMERA {args.camera_id}] Shutting down.")
