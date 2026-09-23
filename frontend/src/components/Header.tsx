@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 interface HeaderProps {
     activeVehiclesCount: number;
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
     return (
         <header>
             <div className="header-content">
+                <Link to="/" style={{ textDecoration: 'none', color: '#888', fontSize: '12px', marginBottom: '8px', display: 'inline-block' }}>← BACK TO ANVAY</Link>
                 <h1>ANVAY <span>Multi-Camera Vehicle Intelligence</span></h1>
                 <p className="subtitle">Distributed Vehicle Tracking & ANPR Command Center</p>
             </div>

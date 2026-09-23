@@ -1,13 +1,13 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { LandingPage } from './pages/LandingPage';
 import { Dashboard } from './pages/Dashboard';
-import { Demo } from './pages/Demo';
 
 export const App: React.FC = () => {
     return (
         <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/demo" element={<Demo />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/demo" element={<Dashboard />} />
         </Routes>
     );
 };
