@@ -42,13 +42,9 @@ function handleMessage(data) {
         state.active_vehicles[v.global_vehicle_id] = v;
         
         if (isNew) {
-            logEvent(`Vehicle detected at Camera ${v.current_camera}`);
-            if (v.plate_detected) {
-                setTimeout(() => logEvent(`Plate recognized`), 1000);
-            }
-        } else if (v.current_camera !== v.journey[v.journey.length - 2]?.camera_id) {
-            logEvent(`Camera transition`);
-            setTimeout(() => logEvent(`Vehicle detected at Camera ${v.current_camera}`), 1000);
+            logEvent(`New vehicle detected at Camera ${v.current_camera}`, v.global_vehicle_id);
+        } else {
+            logEvent(`Transitioned to Camera ${v.current_camera}`, v.global_vehicle_id);
         }
         
         updateUI();
@@ -72,10 +68,10 @@ function logEvent(message, vid) {
     
     const el = document.createElement('div');
     el.className = 'event-item';
-    el.style.marginBottom = '15px';
     el.innerHTML = `
-        <div style="font-size: 12px; color: #888; font-family: 'JetBrains Mono', monospace;">${time}</div>
-        <div style="font-weight: 600; margin-top: 4px; color: #fff;">${message}</div>
+        <span class="event-time">[${time}]</span>
+        ${vid ? `<span class="event-vid">${vid}</span>` : ''}
+        <span>${message}</span>
     `;
     
     timeline.prepend(el);
@@ -124,7 +120,7 @@ function updateUI() {
             // Find what vehicle is currently here
             const v = Object.values(state.active_vehicles).find(v => v.current_camera === i);
             if (v) {
-                overlayEl.innerHTML = `${v.vehicle_type.toUpperCase()}<br>${(v.confidence*100).toFixed(0)}%<br><br>${v.vehicle_color || 'UNKNOWN'}<br><br>${v.plate_text ? v.plate_text : (v.plate_detected ? 'NO PLATE' : 'NO PLATE')}`;
+                overlayEl.innerHTML = `${v.global_vehicle_id}<br>${v.vehicle_type.toUpperCase()} [${(v.confidence*100).toFixed(0)}%]<br>${v.plate_detected ? 'PLATE DETECTED' : 'NO PLATE'}`;
             } else {
                 overlayEl.textContent = 'SCANNING...';
             }
@@ -196,16 +192,16 @@ function updateUI() {
                 </div>
                 <div class="vehicle-meta" style="margin-top: 5px;">
                     <span>LICENSE PLATE</span>
-                    <strong>${v.plate_text ? v.plate_text : 'NO PLATE'}</strong>
+                    <strong>${v.plate_text ? v.plate_text : (v.plate_detected ? 'PLATE DETECTED' : 'NO PLATE')}</strong>
                 </div>
-                <div class="vehicle-meta" style="margin-top: 5px;">
+                ${v.plate_confidence ? `<div class="vehicle-meta" style="margin-top: 5px;">
                     <span>PLATE DETECTOR</span>
-                    <strong>${v.plate_confidence ? (v.plate_confidence*100).toFixed(0) + '%' : 'N/A'}</strong>
-                </div>
-                <div class="vehicle-meta" style="margin-top: 5px;">
-                    <span>OCR CONFIDENCE</span>
-                    <strong>${v.ocr_confidence ? (v.ocr_confidence*100).toFixed(0) + '%' : 'UNAVAILABLE'}</strong>
-                </div>
+                    <strong>${(v.plate_confidence*100).toFixed(0)}%</strong>
+                </div>` : ''}
+                ${v.ocr_confidence ? `<div class="vehicle-meta" style="margin-top: 5px;">
+                    <span>OCR</span>
+                    <strong>${(v.ocr_confidence*100).toFixed(0)}%</strong>
+                </div>` : ''}
             </div>
             <div class="vehicle-details" style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 10px; padding-top: 10px;">
                 <div class="vehicle-meta">
