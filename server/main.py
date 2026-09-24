@@ -17,6 +17,7 @@ from typing import List
 from core.models import DetectionEvent
 from core.config import SERVER_HOST, SERVER_PORT
 from server.tracking import TrackingEngine
+from server.inference import InferencePipeline
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 engine = TrackingEngine()
+inference_pipeline = InferencePipeline()
 
 # Dashboard will be mounted at the end
 
@@ -109,6 +111,53 @@ async def receive_camera_status(update: dict):
         "camera": engine.camera_statuses[camera_id].model_dump()
     })
     return {"status": "success"}
+
+@app.post("/api/camera/frame")
+async def receive_browser_frame(payload: dict):
+    camera_id = int(payload.get("camera_id", 1))
+    frame_b64 = payload.get("frame_base64")
+    if not frame_b64:
+        raise HTTPException(status_code=400, detail="Missing frame_base64")
+
+    # Run inference pipeline asynchronously in threadpool to avoid blocking event loop
+    loop = asyncio.get_running_loop()
+    event, annotated_b64, meta = await loop.run_in_executor(
+        None,
+        inference_pipeline.process_frame,
+        frame_b64,
+        camera_id
+    )
+
+    if annotated_b64:
+        engine.update_camera_status(camera_id, "ONLINE", annotated_b64)
+
+    if event is not None:
+        vehicle = engine.process_detection(event)
+        # Broadcast vehicle update
+        await manager.broadcast({
+            "type": "vehicle_update",
+            "vehicle": vehicle.model_dump(),
+            "event_camera": event.camera_id
+        })
+        # Broadcast camera status update
+        await manager.broadcast({
+            "type": "camera_update",
+            "camera": engine.camera_statuses[camera_id].model_dump()
+        })
+        meta["vehicle"] = vehicle.model_dump()
+    else:
+        # Broadcast heartbeat frame for live feed display
+        if camera_id in engine.camera_statuses:
+            await manager.broadcast({
+                "type": "camera_update",
+                "camera": engine.camera_statuses[camera_id].model_dump()
+            })
+
+    return {
+        "status": "success",
+        "meta": meta,
+        "annotated_frame": annotated_b64
+    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
